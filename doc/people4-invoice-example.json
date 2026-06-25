@@ -1,0 +1,88 @@
+{
+    "invoice": {
+        "number": "INV-2026-0001",
+        "issueDate": "2026-02-16",
+        "typeCode": "380",
+        "currency": "EUR",
+        "buyerReference": "EMPLOYEE-42",
+        "orderReference": "PO-7788"
+    },
+    "seller": {
+        "endpointId": {
+            "id": "1234567890123",
+            "scheme": "0088"
+        },
+        "legalName": "ACME Corp",
+        "vatId": "ESB12345678",
+        "registrationId": "B12345678",
+        "address": {
+            "street": "Main Street 1",
+            "city": "Madrid",
+            "postalCode": "28001",
+            "country": "ES"
+        }
+    },
+    "buyer": {
+        "endpointId": {
+            "id": "9876543210987",
+            "scheme": "0088"
+        },
+        "legalName": "Example Client",
+        "vatId": "ESB98765432",
+        "address": {
+            "street": "Client Ave",
+            "city": "Barcelona",
+            "postalCode": "08001",
+            "country": "ES"
+        }
+    },
+    "lines": [
+        {
+            "id": "1",
+            "description": "Consulting services",
+            "quantity": "10",
+            "unitCode": "HUR",
+            "unitPrice": "100.00",
+            "tax": {
+                "category": "S",
+                "percent": "21"
+            }
+        },
+        {
+            "id": "2",
+            "description": "Transportation services",
+            "quantity": "2",
+            "unitCode": "HUR",
+            "unitPrice": "200.00",
+            "tax": {
+                "category": "S",
+                "percent": "21"
+            }
+        },
+        {
+            "id": "3",
+            "description": "Development services",
+            "quantity": "3",
+            "unitCode": "HUR",
+            "unitPrice": "300.00",
+            "tax": {
+                "category": "S",
+                "percent": "21"
+            }
+        }
+    ],
+    "taxTotals": [
+        {
+            "category": "S",
+            "percent": "21",
+            "taxableAmount": "2300.00",
+            "taxAmount": "483.00"
+        }
+    ],
+    "totals": {
+        "lineExtension": "2300.00",
+        "taxExclusive": "2300.00",
+        "taxInclusive": "2783.00",
+        "payable": "2783.00"
+    }
+}
