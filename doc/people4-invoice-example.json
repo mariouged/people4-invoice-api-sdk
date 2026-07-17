@@ -8,10 +8,6 @@
         "orderReference": "PO-7788"
     },
     "seller": {
-        "endpointId": {
-            "id": "1234567890123",
-            "scheme": "0088"
-        },
         "legalName": "ACME Corp",
         "vatId": "ESB12345678",
         "registrationId": "B12345678",
@@ -20,13 +16,11 @@
             "city": "Madrid",
             "postalCode": "28001",
             "country": "ES"
-        }
+        },
+        "endpointId": "9482348239847239874",
+        "endpointSchemeId": "0106"
     },
     "buyer": {
-        "endpointId": {
-            "id": "9876543210987",
-            "scheme": "0088"
-        },
         "legalName": "Example Client",
         "vatId": "ESB98765432",
         "address": {
@@ -34,7 +28,9 @@
             "city": "Barcelona",
             "postalCode": "08001",
             "country": "ES"
-        }
+        },
+        "endpointId": "FR23342",
+        "endpointSchemeId": "0002"
     },
     "lines": [
         {

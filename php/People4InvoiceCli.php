@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+include_once __DIR__ . '/People4AuthenticationCli.php';
+
 /**
  * People4 Invoice API REST Client
  *
@@ -57,21 +59,23 @@ class Address
 class Party
 {
     public function __construct(
-        public readonly EndpointId $endpointId,
         public readonly string     $legalName,
         public readonly string     $vatId,
         public readonly Address    $address,
-        public readonly ?string    $registrationId = null
+        public readonly ?string    $registrationId = null,
+        public readonly ?string    $endpointId = null,
+        public readonly ?string    $endpointSchemeId = null
     ) {}
 
     public static function fromArray(array $data): self
     {
         return new self(
-            EndpointId::fromArray($data['endpointId']),
             $data['legalName'],
             $data['vatId'],
             Address::fromArray($data['address']),
-            $data['registrationId'] ?? null
+            $data['registrationId'] ?? null,
+            $data['endpointId'] ?? null,
+            $data['endpointSchemeId'] ?? null
         );
     }
 }
@@ -238,7 +242,6 @@ class InvoicePayload
 
         $partyToArray = static function (Party $p): array {
             $out = [
-                'endpointId' => ['id' => $p->endpointId->id, 'scheme' => $p->endpointId->scheme],
                 'legalName'  => $p->legalName,
                 'vatId'      => $p->vatId,
                 'address'    => [
@@ -250,6 +253,12 @@ class InvoicePayload
             ];
             if ($p->registrationId !== null) {
                 $out['registrationId'] = $p->registrationId;
+            }
+            if ($p->endpointId !== null) {
+                $out['endpointId'] = $p->endpointId;
+            }
+            if ($p->endpointSchemeId !== null) {
+                $out['endpointSchemeId'] = $p->endpointSchemeId;
             }
             return $out;
         };
@@ -298,18 +307,8 @@ class People4ApiResponse
         return $this->statusCode >= 200 && $this->statusCode < 300;
     }
 
-    /** Returns the response body as a SimpleXMLElement (for XML responses). */
-    public function toXml(): \SimpleXMLElement
-    {
-        $xml = @simplexml_load_string($this->body);
-        if ($xml === false) {
-            throw new \RuntimeException('Response body is not valid XML: ' . $this->body);
-        }
-        return $xml;
-    }
-
-    /** Returns the raw XML string. */
-    public function getRawXml(): string
+    /** Returns the raw BODY string. */
+    public function getBody(): string
     {
         return $this->body;
     }
@@ -329,7 +328,7 @@ class People4InvoiceClient
      *
      * @throws \RuntimeException on cURL / HTTP error
      */
-    public function submitInvoice(InvoicePayload $payload): People4ApiResponse
+    public function submitInvoice(InvoicePayload $payload, string $jwtTokenRaw): People4ApiResponse
     {
         $json = json_encode($payload->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 
@@ -345,6 +344,7 @@ class People4InvoiceClient
                 'Content-Type: application/json',
                 'Accept: application/xml',
                 'Content-Length: ' . strlen($json),
+                'Authorization: Bearer ' . $jwtTokenRaw,
             ],
             // Collect response headers
             CURLOPT_HEADER         => false,
@@ -379,8 +379,13 @@ class People4InvoiceClient
 
 class People4InvoiceCli
 {
-    private const API_URL      = 'http://172.28.0.10:8080/peppol/v1';
+    private const API_URL      = 'http://172.28.0.10:8080/invoice/v1';
     private const PAYLOAD_FILE = __DIR__ . '/../doc/people4-invoice-example.json';
+
+    private const SSH_HOST = '172.29.0.10';
+    private const SSH_PORT = 2222;
+    private const SSH_USER = 'acmecorporationeu';
+    private const KEY_FILE = __DIR__ . '/../ssh-keys/acmecorporationeu_key';
 
     public static function run(array $argv): int
     {
@@ -390,10 +395,17 @@ class People4InvoiceCli
             echo "Loading payload from: {$payloadFile}" . PHP_EOL;
             $payload = InvoicePayload::fromJsonFile($payloadFile);
 
+            $jwtTokenRaw = People4AuthenticationCli::getJwtTokenRaw(
+                self::SSH_HOST,
+                self::SSH_PORT,
+                self::SSH_USER,
+                self::KEY_FILE
+            );
+
             $client   = new People4InvoiceClient(self::API_URL);
 
             echo "Submitting invoice {$payload->invoice->number} to " . self::API_URL . PHP_EOL;
-            $response = $client->submitInvoice($payload);
+            $response = $client->submitInvoice($payload, $jwtTokenRaw);
 
             echo "HTTP Status: {$response->statusCode}" . PHP_EOL;
 
@@ -403,8 +415,37 @@ class People4InvoiceCli
                 return 1;
             }
 
-            echo "Response XML:" . PHP_EOL;
-            echo $response->getRawXml() . PHP_EOL;
+            echo "Response BODY:" . PHP_EOL;
+            echo $response->getBody() . PHP_EOL;
+
+            echo "Response DECODED:" . PHP_EOL;
+            $apiResponse = json_decode($response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+            if ($apiResponse['people4Id'] ?? null) {
+                echo "People4 ID: " . $apiResponse['people4Id'] . PHP_EOL;
+            } else {
+                fwrite(STDERR, "Error People4 ID not present in response." . PHP_EOL);
+                return 1;
+            }
+
+            if ($apiResponse['ubl'] ?? null) {
+                echo "UBL: " . $apiResponse['ubl'] . PHP_EOL;
+            } else {
+                fwrite(STDERR, "Error UBL not present in response." . PHP_EOL);
+                return 1;
+            }
+
+            if ($apiResponse['peppol'] ?? null) {
+                echo "PEPPOL: " . $apiResponse['peppol'] . PHP_EOL;
+            } else {
+                fwrite(STDERR, "Error PEPPOL not present in response." . PHP_EOL);
+                return 1;
+            }
+
+            echo "OK HTTP Status: {$response->statusCode}" . PHP_EOL;
+            echo "OK Response Body, len: " . strlen($response->getBody()) . PHP_EOL;
+            echo "OK people4Id: " . $apiResponse['people4Id'] . PHP_EOL;
+            echo "OK ubl, len: " . strlen($apiResponse['ubl'] ?? '') . PHP_EOL;
+            echo "OK peppol, len: " . strlen($apiResponse['peppol'] ?? '') . PHP_EOL;
 
             return 0;
         } catch (\Throwable $e) {
