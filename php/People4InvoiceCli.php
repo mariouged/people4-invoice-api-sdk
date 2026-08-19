@@ -2,374 +2,108 @@
 
 declare(strict_types=1);
 
-include_once __DIR__ . '/People4AuthenticationCli.php';
-
-/**
- * People4 Invoice API REST Client
- *
- * Sends an invoice payload (JSON) to the People4 Peppol endpoint
- * and returns the XML response.
- */
-
-/**
- * Uses doc/people4-invoice-example.json by default
- * ```php php/People4InvoiceCli.php```
- *
- * Or pass a custom payload file
- * ```php php/People4InvoiceCli.php /path/to/other-invoice.json```
- */
-
-// ---------------------------------------------------------------------------
-// Value objects
-// ---------------------------------------------------------------------------
-
-class EndpointId
+class People4HttpClient
 {
     public function __construct(
-        public readonly string $id,
-        public readonly string $scheme
+        private readonly bool $disableSslVerification = false,
     ) {}
 
-    public static function fromArray(array $data): self
+    // send an invoice and received ubl, peppol and people4Id in response
+    public function sendInvoice(string $url, string $payload, string $jwt): array
     {
-        return new self($data['id'], $data['scheme']);
-    }
-}
-
-class Address
-{
-    public function __construct(
-        public readonly string $street,
-        public readonly string $city,
-        public readonly string $postalCode,
-        public readonly string $country
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['street'],
-            $data['city'],
-            $data['postalCode'],
-            $data['country']
+        $response = $this->httpRequest(
+            $url,
+            'POST',
+            $payload,
+            $jwt,
         );
-    }
-}
-
-class Party
-{
-    public function __construct(
-        public readonly string     $legalName,
-        public readonly string     $vatId,
-        public readonly Address    $address,
-        public readonly ?string    $registrationId = null,
-        public readonly ?string    $endpointId = null,
-        public readonly ?string    $endpointSchemeId = null
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['legalName'],
-            $data['vatId'],
-            Address::fromArray($data['address']),
-            $data['registrationId'] ?? null,
-            $data['endpointId'] ?? null,
-            $data['endpointSchemeId'] ?? null
-        );
-    }
-}
-
-class Tax
-{
-    public function __construct(
-        public readonly string $category,
-        public readonly string $percent
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self($data['category'], $data['percent']);
-    }
-}
-
-class InvoiceLine
-{
-    public function __construct(
-        public readonly string $id,
-        public readonly string $description,
-        public readonly string $quantity,
-        public readonly string $unitCode,
-        public readonly string $unitPrice,
-        public readonly Tax    $tax
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['id'],
-            $data['description'],
-            $data['quantity'],
-            $data['unitCode'],
-            $data['unitPrice'],
-            Tax::fromArray($data['tax'])
-        );
-    }
-}
-
-class TaxTotal
-{
-    public function __construct(
-        public readonly string $category,
-        public readonly string $percent,
-        public readonly string $taxableAmount,
-        public readonly string $taxAmount
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['category'],
-            $data['percent'],
-            $data['taxableAmount'],
-            $data['taxAmount']
-        );
-    }
-}
-
-class InvoiceTotals
-{
-    public function __construct(
-        public readonly string $lineExtension,
-        public readonly string $taxExclusive,
-        public readonly string $taxInclusive,
-        public readonly string $payable
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['lineExtension'],
-            $data['taxExclusive'],
-            $data['taxInclusive'],
-            $data['payable']
-        );
-    }
-}
-
-class InvoiceHeader
-{
-    public function __construct(
-        public readonly string  $number,
-        public readonly string  $issueDate,
-        public readonly string  $typeCode,
-        public readonly string  $currency,
-        public readonly string  $buyerReference,
-        public readonly ?string $orderReference = null
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            $data['number'],
-            $data['issueDate'],
-            $data['typeCode'],
-            $data['currency'],
-            $data['buyerReference'],
-            $data['orderReference'] ?? null
-        );
-    }
-}
-
-class InvoicePayload
-{
-    /** @param InvoiceLine[] $lines */
-    /** @param TaxTotal[]    $taxTotals */
-    public function __construct(
-        public readonly InvoiceHeader $invoice,
-        public readonly Party         $seller,
-        public readonly Party         $buyer,
-        public readonly array         $lines,
-        public readonly array         $taxTotals,
-        public readonly InvoiceTotals $totals
-    ) {}
-
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            InvoiceHeader::fromArray($data['invoice']),
-            Party::fromArray($data['seller']),
-            Party::fromArray($data['buyer']),
-            array_map([InvoiceLine::class, 'fromArray'], $data['lines']),
-            array_map([TaxTotal::class,    'fromArray'], $data['taxTotals']),
-            InvoiceTotals::fromArray($data['totals'])
-        );
-    }
-
-    public static function fromJsonFile(string $filePath): self
-    {
-        if (!is_readable($filePath)) {
-            throw new \RuntimeException("Cannot read payload file: {$filePath}");
+        if (!$response || !is_string($response)) {
+            throw new \RuntimeException("Response failed to retrieve JWT token from People4 Authentication API.");
         }
+        $invoiceCreated = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        return $invoiceCreated;
+    }
 
-        $json = file_get_contents($filePath);
-        if ($json === false) {
-            throw new \RuntimeException("Failed to read payload file: {$filePath}");
+    public function retrieveToken(string $url, RetrieveTokenPayload $payload): string
+    {
+        $response = $this->httpRequest(
+            $url,
+            'PUT',
+            json_encode($payload->toArray(), JSON_THROW_ON_ERROR),
+            $payload->getApiKey(),
+        );
+        if (!$response || !is_string($response)) {
+            throw new \RuntimeException("Response failed to retrieve JWT token from People4 Authentication API.");
         }
-
-        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-
-        return self::fromArray($data);
+        $jwt = json_decode($response, true, 512, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)['token'] ?? throw new \RuntimeException("JWT token not present in response.");
+        return $jwt;
     }
 
-    public function toArray(): array
+    private function httpRequest(string $url, string $method, string $payload, string $bearer): mixed
     {
-        $lines = array_map(static fn(InvoiceLine $l): array => [
-            'id'          => $l->id,
-            'description' => $l->description,
-            'quantity'    => $l->quantity,
-            'unitCode'    => $l->unitCode,
-            'unitPrice'   => $l->unitPrice,
-            'tax'         => ['category' => $l->tax->category, 'percent' => $l->tax->percent],
-        ], $this->lines);
-
-        $taxTotals = array_map(static fn(TaxTotal $t): array => [
-            'category'      => $t->category,
-            'percent'       => $t->percent,
-            'taxableAmount' => $t->taxableAmount,
-            'taxAmount'     => $t->taxAmount,
-        ], $this->taxTotals);
-
-        $partyToArray = static function (Party $p): array {
-            $out = [
-                'legalName'  => $p->legalName,
-                'vatId'      => $p->vatId,
-                'address'    => [
-                    'street'     => $p->address->street,
-                    'city'       => $p->address->city,
-                    'postalCode' => $p->address->postalCode,
-                    'country'    => $p->address->country,
-                ],
-            ];
-            if ($p->registrationId !== null) {
-                $out['registrationId'] = $p->registrationId;
-            }
-            if ($p->endpointId !== null) {
-                $out['endpointId'] = $p->endpointId;
-            }
-            if ($p->endpointSchemeId !== null) {
-                $out['endpointSchemeId'] = $p->endpointSchemeId;
-            }
-            return $out;
-        };
-
-        $invoiceArray = [
-            'number'          => $this->invoice->number,
-            'issueDate'       => $this->invoice->issueDate,
-            'typeCode'        => $this->invoice->typeCode,
-            'currency'        => $this->invoice->currency,
-            'buyerReference'  => $this->invoice->buyerReference,
-        ];
-        if ($this->invoice->orderReference !== null) {
-            $invoiceArray['orderReference'] = $this->invoice->orderReference;
-        }
-
-        return [
-            'invoice'   => $invoiceArray,
-            'seller'    => $partyToArray($this->seller),
-            'buyer'     => $partyToArray($this->buyer),
-            'lines'     => $lines,
-            'taxTotals' => $taxTotals,
-            'totals'    => [
-                'lineExtension' => $this->totals->lineExtension,
-                'taxExclusive'  => $this->totals->taxExclusive,
-                'taxInclusive'  => $this->totals->taxInclusive,
-                'payable'       => $this->totals->payable,
-            ],
-        ];
-    }
-}
-
-// ---------------------------------------------------------------------------
-// HTTP client
-// ---------------------------------------------------------------------------
-
-class People4ApiResponse
-{
-    public function __construct(
-        public readonly int    $statusCode,
-        public readonly string $body,
-        public readonly array  $headers
-    ) {}
-
-    public function isSuccess(): bool
-    {
-        return $this->statusCode >= 200 && $this->statusCode < 300;
-    }
-
-    /** Returns the raw BODY string. */
-    public function getBody(): string
-    {
-        return $this->body;
-    }
-}
-
-class People4InvoiceClient
-{
-    private const DEFAULT_TIMEOUT = 30;
-
-    public function __construct(
-        private readonly string $baseUrl,
-        private readonly int    $timeout = self::DEFAULT_TIMEOUT
-    ) {}
-
-    /**
-     * Submit an invoice payload and return the server response.
-     *
-     * @throws \RuntimeException on cURL / HTTP error
-     */
-    public function submitInvoice(InvoicePayload $payload, string $jwtTokenRaw): People4ApiResponse
-    {
-        $json = json_encode($payload->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-
         $ch = curl_init();
 
         curl_setopt_array($ch, [
-            CURLOPT_URL            => $this->baseUrl,
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $json,
+            CURLOPT_URL            => $url,
+            // CURLOPT_POSTFIELDS     => $json,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_TIMEOUT        => 15,
             CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json',
-                'Accept: application/xml',
-                'Content-Length: ' . strlen($json),
-                'Authorization: Bearer ' . $jwtTokenRaw,
+                'Accept: application/json',
+                'Content-Length: ' . strlen($payload),
+                'Authorization: Bearer ' . $bearer, // use for jwt and api key
             ],
-            // Collect response headers
-            CURLOPT_HEADER         => false,
+            CURLOPT_HEADER         => false, // Collect response headers
+            CURLOPT_SSL_VERIFYPEER => !$this->disableSslVerification, // curl -k insecure on DEVELOPMENT, not recommended for production
+            CURLOPT_SSL_VERIFYHOST => !$this->disableSslVerification, // curl -k insecure on DEVELOPMENT, not recommended for production
         ]);
-
-        $responseHeaders = [];
-        curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($ch, string $header) use (&$responseHeaders): int {
-            $len  = strlen($header);
-            $parts = explode(':', $header, 2);
-            if (count($parts) === 2) {
-                $responseHeaders[strtolower(trim($parts[0]))] = trim($parts[1]);
-            }
-            return $len;
-        });
-
-        $body       = curl_exec($ch);
+        if ($payload) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        }
+        if ($method === 'PUT') {
+            //curl_setopt($ch, CURLOPT_PUT, 1);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+        }
+        if ($method === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, 1);
+        }
+        $body = curl_exec($ch);
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError  = curl_error($ch);
+        echo "HTTP status code: " . $statusCode . PHP_EOL;
+        echo "HTTP response body length: " . strlen((string) $body) . PHP_EOL;
+        if ($statusCode >= 400 || $statusCode < 200 || $body === false) {
+            $curlError  = curl_error($ch);
+            curl_close($ch);
+            throw new \RuntimeException("HTTP request failed with status code {$statusCode}: {$curlError}");
+        }
         curl_close($ch);
 
-        if ($body === false) {
-            throw new \RuntimeException("cURL request failed: {$curlError}");
-        }
+        return $body;
+    }
+}
 
-        return new People4ApiResponse($statusCode, (string) $body, $responseHeaders);
+class RetrieveTokenPayload
+{
+    public function __construct(
+        private readonly string $apiKey,
+        private readonly string $domain,
+        private readonly string $legalName,
+        private readonly string $vatId
+    ) {}
+
+    public function toArray(): array
+    {
+        return [
+            'domain'     => $this->domain,
+            'legalname'  => $this->legalName,
+            'vatId'      => $this->vatId,
+        ];
+    }
+
+    public function getApiKey(): string
+    {
+        return $this->apiKey;
     }
 }
 
@@ -379,81 +113,66 @@ class People4InvoiceClient
 
 class People4InvoiceCli
 {
-    private const API_URL      = 'http://172.28.0.10:8080/invoice/v1';
-    private const PAYLOAD_FILE = __DIR__ . '/../doc/people4-invoice-example.json';
+    private string $jwt;
 
-    private const SSH_HOST = '172.29.0.10';
-    private const SSH_PORT = 2222;
-    private const SSH_USER = 'acmecorporationeu';
-    private const KEY_FILE = __DIR__ . '/../ssh-keys/acmecorporationeu_key';
+    public function __construct() {}
 
-    public static function run(array $argv): int
+    // retrieve JWT token from Authentication API
+    public function getToken(): string
     {
-        $payloadFile = $argv[1] ?? self::PAYLOAD_FILE;
+        $httpCli   = new People4HttpClient(disableSslVerification: true); // only for testing, not recommended for production
+        $payload = new RetrieveTokenPayload(
+            apiKey: "1c8f86e857cb65b20b26c481b0e2d2d1bf0b93a93aa7ccc35704c37ee63c597b",
+            domain: "acme-corporation.eu",
+            legalName: "ACME Corp",
+            vatId: "NL8200.98.395.B.01",
+        );
+        $jwt = $httpCli->retrieveToken(
+            url: 'https://app.people4.eu/auth-api/token',
+            payload: $payload,
+        );
+        $this->jwt = $jwt;
 
-        try {
-            echo "Loading payload from: {$payloadFile}" . PHP_EOL;
-            $payload = InvoicePayload::fromJsonFile($payloadFile);
+        return $jwt;
+    }
 
-            $jwtTokenRaw = People4AuthenticationCli::getJwtTokenRaw(
-                self::SSH_HOST,
-                self::SSH_PORT,
-                self::SSH_USER,
-                self::KEY_FILE
-            );
-
-            $client   = new People4InvoiceClient(self::API_URL);
-
-            echo "Submitting invoice {$payload->invoice->number} to " . self::API_URL . PHP_EOL;
-            $response = $client->submitInvoice($payload, $jwtTokenRaw);
-
-            echo "HTTP Status: {$response->statusCode}" . PHP_EOL;
-
-            if (!$response->isSuccess()) {
-                fwrite(STDERR, "Error response ({$response->statusCode}):" . PHP_EOL);
-                fwrite(STDERR, $response->body . PHP_EOL);
-                return 1;
-            }
-
-            echo "Response BODY:" . PHP_EOL;
-            echo $response->getBody() . PHP_EOL;
-
-            echo "Response DECODED:" . PHP_EOL;
-            $apiResponse = json_decode($response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-            if ($apiResponse['people4Id'] ?? null) {
-                echo "People4 ID: " . $apiResponse['people4Id'] . PHP_EOL;
-            } else {
-                fwrite(STDERR, "Error People4 ID not present in response." . PHP_EOL);
-                return 1;
-            }
-
-            if ($apiResponse['ubl'] ?? null) {
-                echo "UBL: " . $apiResponse['ubl'] . PHP_EOL;
-            } else {
-                fwrite(STDERR, "Error UBL not present in response." . PHP_EOL);
-                return 1;
-            }
-
-            if ($apiResponse['peppol'] ?? null) {
-                echo "PEPPOL: " . $apiResponse['peppol'] . PHP_EOL;
-            } else {
-                fwrite(STDERR, "Error PEPPOL not present in response." . PHP_EOL);
-                return 1;
-            }
-
-            echo "OK HTTP Status: {$response->statusCode}" . PHP_EOL;
-            echo "OK Response Body, len: " . strlen($response->getBody()) . PHP_EOL;
-            echo "OK people4Id: " . $apiResponse['people4Id'] . PHP_EOL;
-            echo "OK ubl, len: " . strlen($apiResponse['ubl'] ?? '') . PHP_EOL;
-            echo "OK peppol, len: " . strlen($apiResponse['peppol'] ?? '') . PHP_EOL;
-
-            return 0;
-        } catch (\Throwable $e) {
-            fwrite(STDERR, 'Fatal: ' . $e->getMessage() . PHP_EOL);
-            return 1;
-        }
+    // send invoice payload to Invoice API POST method
+    public function createUblInvoice($invoiceJsonRaw): array
+    {
+        $httpCli   = new People4HttpClient(disableSslVerification: true); // only for testing, not recommended for production
+        $invoiceCreated = $httpCli->sendInvoice(
+            url: 'https://app.people4.eu/invoice-api/invoice/v1',
+            payload: $invoiceJsonRaw,
+            jwt: $this->jwt,
+        );
+        return $invoiceCreated;
     }
 }
 
-exit(People4InvoiceCli::run($argv));
+// example
+try {
+    $easyComplianceCli = new People4InvoiceCli();
+    echo "Trying to retrieve JWT token from Authentication API" . PHP_EOL;
+    $jwt = $easyComplianceCli->getToken();
+    echo "OK: JWT token retrieved: '" . $jwt . "'" . PHP_EOL;
 
+    echo "Read json invoice minimal test file and send to People4 Invoice API" . PHP_EOL;
+    $invoiceFile = __DIR__ . '/../inputs/invoice-v1-minimal-test.json';
+    $invoiceJsonRaw = file_get_contents($invoiceFile);
+    echo "Trying to send invoice payload to Invoice API to generate UBL and PEPPOL invoice" . PHP_EOL;
+    $invoiceCreated = $easyComplianceCli->createUblInvoice($invoiceJsonRaw);
+    echo "DEBUG: Invoice created response: " . json_encode($invoiceCreated, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    $invoiceCreated['people4Id'] ?? throw new \RuntimeException("People4 ID not present in response.");
+    $invoiceCreated['ubl'] ?? throw new \RuntimeException("UBL not present in response.");
+    $invoiceCreated['peppol'] ?? throw new \RuntimeException("PEPPOL not present in response.");
+    if (!empty($invoiceCreated['messages']) && is_array($invoiceCreated['messages'])) {
+        foreach ($invoiceCreated['messages'] as $message) {
+            echo "Error Message: " . $message . PHP_EOL;
+        }
+    }
+    return 0;
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'Fatal: ' . $e->getMessage() . PHP_EOL);
+    echo "Error: " . $e->getMessage() . PHP_EOL;
+    return 1;
+}

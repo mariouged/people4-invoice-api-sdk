@@ -1,0 +1,69 @@
+{
+    "invoice": {
+        "number": "INV-2026-TEST-12115118",
+        "issueDate": "2026-07-27",
+        "currency": "EUR"
+    },
+    "seller": {
+        "legalName": "ACME DE FRANCE SELLER",
+        "vatId": "FR03552081317",
+        "address": {
+            "street": "10 Rue de la Paix",
+            "city": "Paris",
+            "postalCode": "75002",
+            "country": "FR"
+        }
+    },
+    "buyer": {
+        "legalName": "MOL Magyar Buyer - és Gázipari Buyer",
+        "vatId": "HU99999999",
+        "address": {
+            "street": "Hovedgatan 32",
+            "city": "Budapest",
+            "postalCode": "1011",
+            "country": "HU"
+        }
+    },
+    "payment": {
+        "reference": "Deb. 10202 / Fact. 12115118"
+    },
+    "lines": [
+        {
+            "description": "Consulting services",
+            "quantity": "10",
+            "unitPrice": "100.00",
+            "tax": {
+                "percent": "21"
+            }
+        },
+        {
+            "description": "Subscription fee 1st quarter",
+            "quantity": "2",
+            "unitPrice": "80.00",
+            "tax": {
+                "percent": "25"
+            }
+        },
+        {
+            "description": "item name 3, Description of item 3",
+            "quantity": "7",
+            "unitPrice": "400.00",
+            "tax": {
+                "percent": "10"
+            }
+        },
+        {
+            "description": "SaaS service 24/7",
+            "quantity": "20",
+            "unitPrice": "50.00",
+            "tax": {
+                "percent": "21"
+            }
+        }
+    ],
+    "totals": {
+        "taxExclusive": "4960.00",
+        "taxAmount": "740.00",
+        "taxInclusive": "5700.00"
+    }
+}
