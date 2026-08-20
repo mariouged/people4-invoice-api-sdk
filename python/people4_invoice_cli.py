@@ -1,368 +1,163 @@
 """
-People4 Invoice API REST Client
+People4 Invoice API CLI
 
-Sends an invoice payload (JSON) to the People4 Peppol endpoint
-and returns the XML response.
+Retrieves a JWT from the People4 Authentication API, then sends an invoice
+payload (JSON) to the People4 Invoice API and prints the UBL/PEPPOL result.
 
 Usage:
-    # uses doc/people4-invoice-example.json by default
-    python people4_invoice_cli.py
-
-    # or pass a custom payload file
-    python people4_invoice_cli.py /path/to/other-invoice.json
+    python python/people4_invoice_cli.py
 """
 
 from __future__ import annotations
 
 import json
+import ssl
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from xml.etree import ElementTree as ET
-
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class EndpointId:
-    id: str
-    scheme: str
+class People4HttpClient:
+    def __init__(self, disable_ssl_verification: bool = False) -> None:
+        self._disable_ssl_verification = disable_ssl_verification
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "EndpointId":
-        return cls(id=data["id"], scheme=data["scheme"])
+    # send an invoice and receive ubl, peppol and people4Id in response
+    def send_invoice(self, url: str, payload: str, jwt: str) -> dict:
+        response = self._http_request(url, "POST", payload, jwt)
+        if not response:
+            raise RuntimeError("Response failed to retrieve JWT token from People4 Authentication API.")
+        return json.loads(response)
 
-    def to_dict(self) -> dict:
-        return {"id": self.id, "scheme": self.scheme}
+    def retrieve_token(self, url: str, payload: "RetrieveTokenPayload") -> str:
+        response = self._http_request(url, "PUT", json.dumps(payload.to_dict()), payload.api_key)
+        if not response:
+            raise RuntimeError("Response failed to retrieve JWT token from People4 Authentication API.")
+        token = json.loads(response).get("token")
+        if not token:
+            raise RuntimeError("JWT token not present in response.")
+        return token
 
-
-@dataclass(frozen=True)
-class Address:
-    street: str
-    city: str
-    postal_code: str
-    country: str
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Address":
-        return cls(
-            street=data["street"],
-            city=data["city"],
-            postal_code=data["postalCode"],
-            country=data["country"],
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "street": self.street,
-            "city": self.city,
-            "postalCode": self.postal_code,
-            "country": self.country,
-        }
-
-
-@dataclass(frozen=True)
-class Party:
-    endpoint_id: EndpointId
-    legal_name: str
-    vat_id: str
-    address: Address
-    registration_id: Optional[str] = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Party":
-        return cls(
-            endpoint_id=EndpointId.from_dict(data["endpointId"]),
-            legal_name=data["legalName"],
-            vat_id=data["vatId"],
-            address=Address.from_dict(data["address"]),
-            registration_id=data.get("registrationId"),
-        )
-
-    def to_dict(self) -> dict:
-        out: dict = {
-            "endpointId": self.endpoint_id.to_dict(),
-            "legalName": self.legal_name,
-            "vatId": self.vat_id,
-            "address": self.address.to_dict(),
-        }
-        if self.registration_id is not None:
-            out["registrationId"] = self.registration_id
-        return out
-
-
-@dataclass(frozen=True)
-class Tax:
-    category: str
-    percent: str
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Tax":
-        return cls(category=data["category"], percent=data["percent"])
-
-    def to_dict(self) -> dict:
-        return {"category": self.category, "percent": self.percent}
-
-
-@dataclass(frozen=True)
-class InvoiceLine:
-    id: str
-    description: str
-    quantity: str
-    unit_code: str
-    unit_price: str
-    tax: Tax
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "InvoiceLine":
-        return cls(
-            id=data["id"],
-            description=data["description"],
-            quantity=data["quantity"],
-            unit_code=data["unitCode"],
-            unit_price=data["unitPrice"],
-            tax=Tax.from_dict(data["tax"]),
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "description": self.description,
-            "quantity": self.quantity,
-            "unitCode": self.unit_code,
-            "unitPrice": self.unit_price,
-            "tax": self.tax.to_dict(),
-        }
-
-
-@dataclass(frozen=True)
-class TaxTotal:
-    category: str
-    percent: str
-    taxable_amount: str
-    tax_amount: str
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "TaxTotal":
-        return cls(
-            category=data["category"],
-            percent=data["percent"],
-            taxable_amount=data["taxableAmount"],
-            tax_amount=data["taxAmount"],
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "category": self.category,
-            "percent": self.percent,
-            "taxableAmount": self.taxable_amount,
-            "taxAmount": self.tax_amount,
-        }
-
-
-@dataclass(frozen=True)
-class InvoiceTotals:
-    line_extension: str
-    tax_exclusive: str
-    tax_inclusive: str
-    payable: str
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "InvoiceTotals":
-        return cls(
-            line_extension=data["lineExtension"],
-            tax_exclusive=data["taxExclusive"],
-            tax_inclusive=data["taxInclusive"],
-            payable=data["payable"],
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "lineExtension": self.line_extension,
-            "taxExclusive": self.tax_exclusive,
-            "taxInclusive": self.tax_inclusive,
-            "payable": self.payable,
-        }
-
-
-@dataclass(frozen=True)
-class InvoiceHeader:
-    number: str
-    issue_date: str
-    type_code: str
-    currency: str
-    buyer_reference: str
-    order_reference: Optional[str] = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "InvoiceHeader":
-        return cls(
-            number=data["number"],
-            issue_date=data["issueDate"],
-            type_code=data["typeCode"],
-            currency=data["currency"],
-            buyer_reference=data["buyerReference"],
-            order_reference=data.get("orderReference"),
-        )
-
-    def to_dict(self) -> dict:
-        out: dict = {
-            "number": self.number,
-            "issueDate": self.issue_date,
-            "typeCode": self.type_code,
-            "currency": self.currency,
-            "buyerReference": self.buyer_reference,
-        }
-        if self.order_reference is not None:
-            out["orderReference"] = self.order_reference
-        return out
-
-
-@dataclass(frozen=True)
-class InvoicePayload:
-    invoice: InvoiceHeader
-    seller: Party
-    buyer: Party
-    lines: tuple[InvoiceLine, ...]
-    tax_totals: tuple[TaxTotal, ...]
-    totals: InvoiceTotals
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "InvoicePayload":
-        return cls(
-            invoice=InvoiceHeader.from_dict(data["invoice"]),
-            seller=Party.from_dict(data["seller"]),
-            buyer=Party.from_dict(data["buyer"]),
-            lines=tuple(InvoiceLine.from_dict(l) for l in data["lines"]),
-            tax_totals=tuple(TaxTotal.from_dict(t) for t in data["taxTotals"]),
-            totals=InvoiceTotals.from_dict(data["totals"]),
-        )
-
-    @classmethod
-    def from_json_file(cls, file_path: str | Path) -> "InvoicePayload":
-        path = Path(file_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"Cannot read payload file: {path}")
-        with path.open(encoding="utf-8") as fh:
-            data = json.load(fh)
-        return cls.from_dict(data)
-
-    def to_dict(self) -> dict:
-        return {
-            "invoice": self.invoice.to_dict(),
-            "seller": self.seller.to_dict(),
-            "buyer": self.buyer.to_dict(),
-            "lines": [line.to_dict() for line in self.lines],
-            "taxTotals": [tt.to_dict() for tt in self.tax_totals],
-            "totals": self.totals.to_dict(),
-        }
-
-
-# ---------------------------------------------------------------------------
-# HTTP client
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class People4ApiResponse:
-    status_code: int
-    body: str
-    headers: dict[str, str]
-
-    def is_success(self) -> bool:
-        return 200 <= self.status_code < 300
-
-    def to_xml(self) -> ET.Element:
-        """Parse and return the response body as an ElementTree Element."""
-        try:
-            return ET.fromstring(self.body)
-        except ET.ParseError as exc:
-            raise ValueError(f"Response body is not valid XML: {self.body}") from exc
-
-    def get_raw_xml(self) -> str:
-        """Return the raw XML string."""
-        return self.body
-
-
-class People4InvoiceClient:
-    DEFAULT_TIMEOUT: int = 30
-
-    def __init__(self, base_url: str, timeout: int = DEFAULT_TIMEOUT) -> None:
-        self._base_url = base_url
-        self._timeout = timeout
-
-    def submit_invoice(self, payload: InvoicePayload) -> People4ApiResponse:
-        """POST the invoice payload and return the server response."""
-        body_bytes = json.dumps(payload.to_dict(), ensure_ascii=False).encode("utf-8")
-
+    def _http_request(self, url: str, method: str, payload: str, bearer: str) -> str:
+        body = payload.encode("utf-8") if payload else None
         request = urllib.request.Request(
-            url=self._base_url,
-            data=body_bytes,
-            method="POST",
+            url=url,
+            data=body,
+            method=method,
             headers={
                 "Content-Type": "application/json",
-                "Accept": "application/xml",
-                "Content-Length": str(len(body_bytes)),
+                "Accept": "application/json",
+                "Content-Length": str(len(body) if body else 0),
+                "Authorization": f"Bearer {bearer}",  # use for jwt and api key
             },
         )
-
+        context = None
+        if self._disable_ssl_verification:
+            # curl -k insecure on DEVELOPMENT, not recommended for production
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as resp:
-                status_code: int = resp.status
-                response_body: str = resp.read().decode("utf-8")
-                headers: dict[str, str] = dict(resp.headers)
+            with urllib.request.urlopen(request, timeout=15, context=context) as response:
+                return response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
-            status_code = exc.code
-            response_body = exc.read().decode("utf-8")
-            headers = dict(exc.headers)
+            error_body = exc.read().decode("utf-8")
+            raise RuntimeError(f"HTTP request failed with status code {exc.code}: {error_body}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"HTTP request failed: {exc.reason}") from exc
 
-        return People4ApiResponse(
-            status_code=status_code,
-            body=response_body,
-            headers=headers,
-        )
+
+@dataclass(frozen=True)
+class RetrieveTokenPayload:
+    api_key: str
+    domain: str
+    legal_name: str
+    vat_id: str
+
+    def to_dict(self) -> dict:
+        return {
+            "domain": self.domain,
+            "legalname": self.legal_name,
+            "vatId": self.vat_id,
+        }
 
 
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-_API_URL = "http://172.28.0.10:8080/peppol/v1"
-_DEFAULT_PAYLOAD = Path(__file__).parent.parent / "doc" / "people4-invoice-example.json"
+
+class People4InvoiceCli:
+    def __init__(self) -> None:
+        self._jwt: Optional[str] = None
+
+    # retrieve JWT token from Authentication API
+    def get_token(self) -> str:
+        http_cli = People4HttpClient(disable_ssl_verification=True)  # only for testing, not recommended for production
+        payload = RetrieveTokenPayload(
+            api_key="1c8f86e857cb65b20b26c481b0e2d2d1bf0b93a93aa7ccc35704c37ee63c597b",
+            domain="acme-corporation.eu",
+            legal_name="ACME Corp",
+            vat_id="NL8200.98.395.B.01",
+        )
+        self._jwt = http_cli.retrieve_token(
+            url="https://app.people4.eu/auth-api/token",
+            payload=payload,
+        )
+        return self._jwt
+
+    # send invoice payload to Invoice API POST method
+    def create_ubl_invoice(self, invoice_json_raw: str) -> dict:
+        http_cli = People4HttpClient(disable_ssl_verification=True)  # only for testing, not recommended for production
+        return http_cli.send_invoice(
+            url="https://app.people4.eu/invoice-api/invoice/v1",
+            payload=invoice_json_raw,
+            jwt=self._jwt,
+        )
 
 
-def main(argv: list[str]) -> int:
-    payload_file = Path(argv[1]) if len(argv) > 1 else _DEFAULT_PAYLOAD
-
+def main() -> int:
+    easy_compliance_cli = People4InvoiceCli()
     try:
-        print(f"Loading payload from: {payload_file}")
-        payload = InvoicePayload.from_json_file(payload_file)
+        print("Trying to retrieve JWT token from Authentication API")
+        easy_compliance_cli.get_token()
+        # print(f"OK: JWT token retrieved: '{jwt}'")
 
-        client = People4InvoiceClient(_API_URL)
+        print("Read json invoice minimal test file and send to People4 Invoice API")
+        invoice_file = Path(__file__).parent.parent / "inputs" / "invoice-v1-minimal-test.json"
+        invoice_json_raw = invoice_file.read_text(encoding="utf-8")
+        print("Trying to send invoice payload to Invoice API to generate UBL and PEPPOL invoice")
+        invoice_created = easy_compliance_cli.create_ubl_invoice(invoice_json_raw)
+        # print(f"DEBUG: Invoice created response: {json.dumps(invoice_created)}")
 
-        print(f"Submitting invoice {payload.invoice.number} to {_API_URL}")
-        response = client.submit_invoice(payload)
+        if "people4Id" not in invoice_created:
+            raise RuntimeError("People4 ID not present in response.")
+        if "ubl" not in invoice_created:
+            raise RuntimeError("UBL not present in response.")
+        if "peppol" not in invoice_created:
+            raise RuntimeError("PEPPOL not present in response.")
 
-        print(f"HTTP Status: {response.status_code}")
+        messages = invoice_created.get("messages")
+        if messages:
+            message = None
+            for message in messages:
+                print(f"Error Message: {message}")
+            raise RuntimeError(f"Error on generate UBL or PEPPOL message: {message}")
 
-        if not response.is_success():
-            print(f"Error response ({response.status_code}):", file=sys.stderr)
-            print(response.body, file=sys.stderr)
-            return 1
-
-        print("Response XML:")
-        print(response.get_raw_xml())
+        if invoice_created.get("people4Id"):
+            print(f"OK: Invoice created with People4 ID: {invoice_created['people4Id']}")
+        if invoice_created.get("ubl"):
+            print(f"OK: UBL invoice created with length: {len(invoice_created['ubl'])}")
+        if invoice_created.get("peppol"):
+            print(f"OK: PEPPOL invoice created with length: {len(invoice_created['peppol'])}")
         return 0
-
     except Exception as exc:  # noqa: BLE001
         print(f"Fatal: {exc}", file=sys.stderr)
+        print(f"Error: {exc}")
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

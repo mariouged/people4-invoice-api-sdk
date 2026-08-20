@@ -8,9 +8,12 @@ people4-invoice-api-sdk
 
 The cli using the authentication api cli
 
-python
-```
-
+python (requires Python 3.12+, run from the repository root)
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python python/people4_invoice_cli.py
+deactivate
 ```
 
 PHP
@@ -26,15 +29,3 @@ java -cp java People4InvoiceClient
 
 
 ## people4 authentication api cli
-
-All clients need the raw token, it's will be send in each request header "Authorization: Bearer $RAW_TOKEN"
-
-python
-```
-
-```
-
-php
-```
-php php/People4AuthenticationCli.php TEST_STANDALONE
-```
