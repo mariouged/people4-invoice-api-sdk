@@ -180,6 +180,9 @@ try {
     if (isset($invoiceCreated['peppol'])) {
         echo "OK: PEPPOL invoice created with length: " . strlen($invoiceCreated['peppol']) . PHP_EOL;
     }
+    file_put_contents(__DIR__ . '/../outputs/response-invoice-v1-minimal-created.json', json_encode($invoiceCreated, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+    file_put_contents(__DIR__ . '/../outputs/response-invoice-v1-minimal-test-ubl.xml', $invoiceCreated['ubl']);
+    file_put_contents(__DIR__ . '/../outputs/response-invoice-v1-minimal-test-peppol.xml', $invoiceCreated['peppol']);
     return 0;
 } catch (\Throwable $e) {
     fwrite(STDERR, 'Fatal: ' . $e->getMessage() . PHP_EOL);
