@@ -70,8 +70,8 @@ class People4HttpClient
         }
         $body = curl_exec($ch);
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        echo "HTTP status code: " . $statusCode . PHP_EOL;
-        echo "HTTP response body length: " . strlen((string) $body) . PHP_EOL;
+        // echo "HTTP status code: " . $statusCode . PHP_EOL;
+        // echo "HTTP response body length: " . strlen((string) $body) . PHP_EOL;
         if ($statusCode >= 400 || $statusCode < 200 || $body === false) {
             $curlError  = curl_error($ch);
             curl_close($ch);
@@ -154,14 +154,14 @@ try {
     $easyComplianceCli = new People4InvoiceCli();
     echo "Trying to retrieve JWT token from Authentication API" . PHP_EOL;
     $jwt = $easyComplianceCli->getToken();
-    echo "OK: JWT token retrieved: '" . $jwt . "'" . PHP_EOL;
+    // echo "OK: JWT token retrieved: '" . $jwt . "'" . PHP_EOL;
 
     echo "Read json invoice minimal test file and send to People4 Invoice API" . PHP_EOL;
     $invoiceFile = __DIR__ . '/../inputs/invoice-v1-minimal-test.json';
     $invoiceJsonRaw = file_get_contents($invoiceFile);
     echo "Trying to send invoice payload to Invoice API to generate UBL and PEPPOL invoice" . PHP_EOL;
     $invoiceCreated = $easyComplianceCli->createUblInvoice($invoiceJsonRaw);
-    echo "DEBUG: Invoice created response: " . json_encode($invoiceCreated, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    // echo "DEBUG: Invoice created response: " . json_encode($invoiceCreated, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . PHP_EOL;
     $invoiceCreated['people4Id'] ?? throw new \RuntimeException("People4 ID not present in response.");
     $invoiceCreated['ubl'] ?? throw new \RuntimeException("UBL not present in response.");
     $invoiceCreated['peppol'] ?? throw new \RuntimeException("PEPPOL not present in response.");
@@ -169,6 +169,16 @@ try {
         foreach ($invoiceCreated['messages'] as $message) {
             echo "Error Message: " . $message . PHP_EOL;
         }
+        throw new \RuntimeException("Error on generate UBL or PEPPOL message: " . $message);
+    }
+    if (isset($invoiceCreated['people4Id'])) {
+        echo "OK: Invoice created with People4 ID: " . $invoiceCreated['people4Id'] . PHP_EOL;
+    }
+    if (isset($invoiceCreated['ubl'])) {
+        echo "OK: UBL invoice created with length: " . strlen($invoiceCreated['ubl']) . PHP_EOL;
+    }
+    if (isset($invoiceCreated['peppol'])) {
+        echo "OK: PEPPOL invoice created with length: " . strlen($invoiceCreated['peppol']) . PHP_EOL;
     }
     return 0;
 } catch (\Throwable $e) {
