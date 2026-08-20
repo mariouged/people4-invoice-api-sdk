@@ -13,9 +13,15 @@ python
 
 ```
 
-php
+PHP
+```bash
+php php/People4InvoiceCli.php 
 ```
-php php/People4InvoiceCli.php
+
+JAVA (requires OpenJDK 17+, run from the repository root)
+```bash
+javac -d java --release 17 java/People4InvoiceClient.java
+java -cp java People4InvoiceClient
 ```
 
 
