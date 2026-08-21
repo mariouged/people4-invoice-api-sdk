@@ -452,9 +452,9 @@ public final class People4InvoiceClient {
         Map<String, Object> invoiceCreated = httpCli.sendInvoice("https://app.people4.eu/invoice-api/invoice/v1", invoiceJsonRaw, this.jwt);
         // System.out.println("DEBUG: Invoice created response: " + Json.encode(invoiceCreated));
         return new InvoiceResponse(
-            String.valueOf(invoiceCreated.get("peopleId")),
-            (String) invoiceCreated.get("ubl"),
-            (String) invoiceCreated.get("peppol"),
+            String.valueOf(invoiceCreated.get("people4Id")),
+            String.valueOf(invoiceCreated.get("ubl")),
+            String.valueOf(invoiceCreated.get("peppol")),
             (List<String>) invoiceCreated.get("messages")
         );
     }
