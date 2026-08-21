@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -398,6 +399,37 @@ final class Json {
     }
 }
 
+final class InvoiceResponse {
+
+    private final String peopleId;
+    private final String ubl;
+    private final String peppol;
+    private final List<String> messages;
+
+    InvoiceResponse(String peopleId, String ubl, String peppol, List<String> messages) {
+        this.peopleId = peopleId;
+        this.ubl = ubl;
+        this.peppol = peppol;
+        this.messages = messages != null ? messages : Collections.<String>emptyList();
+    }
+
+    String getPeopleId() {
+        return peopleId;
+    }
+
+    String getUbl() {
+        return ubl;
+    }
+
+    String getPeppol() {
+        return peppol;
+    }
+
+    List<String> getMessages() {
+        return messages;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
@@ -407,21 +439,24 @@ public final class People4InvoiceClient {
     private String jwt;
 
     // retrieve JWT token from Authentication API
-    public String getToken() {
+    public String getToken(RetrieveTokenPayload payload) {
         People4HttpClient httpCli = new People4HttpClient(true); // only for testing, not recommended for production
-        RetrieveTokenPayload payload = new RetrieveTokenPayload(
-                "1c8f86e857cb65b20b26c481b0e2d2d1bf0b93a93aa7ccc35704c37ee63c597b",
-                "acme-corporation.eu",
-                "ACME Corp",
-                "NL8200.98.395.B.01");
         this.jwt = httpCli.retrieveToken("https://app.people4.eu/auth-api/token", payload);
         return this.jwt;
     }
 
     // send invoice payload to Invoice API POST method
-    public Map<String, Object> createUblInvoice(String invoiceJsonRaw) {
+    @SuppressWarnings("unchecked")
+    public InvoiceResponse createUblInvoice(String invoiceJsonRaw) {
         People4HttpClient httpCli = new People4HttpClient(true); // only for testing, not recommended for production
-        return httpCli.sendInvoice("https://app.people4.eu/invoice-api/invoice/v1", invoiceJsonRaw, this.jwt);
+        Map<String, Object> invoiceCreated = httpCli.sendInvoice("https://app.people4.eu/invoice-api/invoice/v1", invoiceJsonRaw, this.jwt);
+        // System.out.println("DEBUG: Invoice created response: " + Json.encode(invoiceCreated));
+        return new InvoiceResponse(
+            String.valueOf(invoiceCreated.get("peopleId")),
+            (String) invoiceCreated.get("ubl"),
+            (String) invoiceCreated.get("peppol"),
+            (List<String>) invoiceCreated.get("messages")
+        );
     }
 
     // resolve inputs/invoice-v1-minimal-test.json relative to this source/class file, like PHP's __DIR__
@@ -435,39 +470,44 @@ public final class People4InvoiceClient {
         try {
             People4InvoiceClient easyComplianceCli = new People4InvoiceClient();
             System.out.println("Trying to retrieve JWT token from Authentication API");
-            easyComplianceCli.getToken();
+            RetrieveTokenPayload payload = new RetrieveTokenPayload(
+                "1c8f86e857cb65b20b26c481b0e2d2d1bf0b93a93aa7ccc35704c37ee63c597b",
+                "acme-corporation.eu",
+                "ACME Corp",
+                "NL8200.98.395.B.01");
+            easyComplianceCli.getToken(payload);
             // System.out.println("OK: JWT token retrieved: '" + jwt + "'");
 
             System.out.println("Read json invoice minimal test file and send to People4 Invoice API");
             Path invoiceFile = resolveDefaultInvoiceFile();
             String invoiceJsonRaw = Files.readString(invoiceFile, StandardCharsets.UTF_8);
             System.out.println("Trying to send invoice payload to Invoice API to generate UBL and PEPPOL invoice");
-            Map<String, Object> invoiceCreated = easyComplianceCli.createUblInvoice(invoiceJsonRaw);
+            InvoiceResponse invoiceCreated = easyComplianceCli.createUblInvoice(invoiceJsonRaw);
             // System.out.println("DEBUG: Invoice created response: " + Json.encode(invoiceCreated));
 
-            if (invoiceCreated.get("people4Id") == null) {
+            if (invoiceCreated.getPeopleId() == null) {
                 throw new RuntimeException("People4 ID not present in response.");
             }
-            if (invoiceCreated.get("ubl") == null) {
+            if (invoiceCreated.getUbl() == null) {
                 throw new RuntimeException("UBL not present in response.");
             }
-            if (invoiceCreated.get("peppol") == null) {
+            if (invoiceCreated.getPeppol() == null) {
                 throw new RuntimeException("PEPPOL not present in response.");
             }
 
-            Object messages = invoiceCreated.get("messages");
-            if (messages instanceof List<?> messageList && !messageList.isEmpty()) {
-                Object lastMessage = null;
-                for (Object message : messageList) {
+            List<String> messages = invoiceCreated.getMessages();
+            if (messages != null && !messages.isEmpty()) {
+                String lastMessage = null;
+                for (String message : messages) {
                     System.out.println("Error Message: " + message);
                     lastMessage = message;
                 }
                 throw new RuntimeException("Error on generate UBL or PEPPOL message: " + lastMessage);
             }
 
-            System.out.println("OK: Invoice created with People4 ID: " + invoiceCreated.get("people4Id"));
-            System.out.println("OK: UBL invoice created with length: " + invoiceCreated.get("ubl").toString().length());
-            System.out.println("OK: PEPPOL invoice created with length: " + invoiceCreated.get("peppol").toString().length());
+            System.out.println("OK: Invoice created with People4 ID: " + invoiceCreated.getPeopleId());
+            System.out.println("OK: UBL invoice created with length: " + invoiceCreated.getUbl().length());
+            System.out.println("OK: PEPPOL invoice created with length: " + invoiceCreated.getPeppol().length());
             System.exit(0);
         } catch (Throwable e) {
             System.err.println("Fatal: " + e.getMessage());
